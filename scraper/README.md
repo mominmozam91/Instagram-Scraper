@@ -148,6 +148,38 @@ Log levels:
 
 ## Limitations & Notes
 
+### ⚠️ Critical: Pagination Blocked by Instagram (2024+)
+
+**Current Implementation Status:**
+- ✅ **Fully Working**: Profile metadata (all required fields)
+- ✅ **Fully Working**: First 12 posts via `/api/v1/users/web_profile_info/`
+- ❌ **Blocked**: GraphQL pagination beyond 12 posts
+
+**Why Pagination Doesn't Work:**
+Instagram's anti-bot system (updated in 2024-2026) now blocks GraphQL queries from automated HTTP requests, even with valid session cookies. The GraphQL endpoint returns HTML login pages instead of JSON data when accessed from:
+- Datacenter IPs (AWS, GCP, Azure, DigitalOcean)
+- HTTP libraries without proper TLS fingerprinting
+- Scripts without JavaScript execution context
+- Requests with non-browser-like patterns
+
+**Solutions for 50+ Posts:**
+1. **Residential Proxy** (Recommended): Use services like BrightData, Smartproxy, or Oxylabs (~$5-20/month)
+2. **Browser Automation**: Use Selenium/Playwright (slower, higher resource usage)
+3. **Accept Limitation**: Work with 12 most recent posts per scrape
+
+**Test Results:**
+```bash
+# Without residential proxy
+python scraper.py instagram -n 50
+# Result: 12 posts ✅ | GraphQL pagination blocked ❌
+
+# With --sessionid cookie from browser
+python scraper.py instagram -n 50 --sessionid "..."
+# Result: Still blocked (IP detection overrides cookie auth)
+```
+
+### Other Limitations
+
 1. **Public Accounts Only**: Can only scrape public Instagram profiles
 2. **Terms of Service**: Use responsibly and respect Instagram's ToS
 3. **Rate Limits**: Instagram may rate limit aggressive scraping
