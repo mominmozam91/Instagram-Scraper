@@ -300,3 +300,143 @@ class InstagramScraper:
             return None
         
         return data
+
+    def fetch_graphql_page(self, user_id: str, after: Optional[str] = None, first: int = 12):
+        """Fetch a page of posts via GraphQL, allowing the first page (no cursor)."""
+        QUERY_HASH = "69cba40317214236af40e7efa697781d"
+        variables = {"id": user_id, "first": first}
+        if after:
+            variables["after"] = after
+        params = {"query_hash": QUERY_HASH, "variables": json.dumps(variables)}
+        url = "https://www.instagram.com/graphql/query/"
+        
+        data = self._retry_graphql(url, params, max_retries=3)
+        if not data:
+            print("[-] GraphQL request failed or returned non-JSON.")
+            return None
+        
+        if 'errors' in data:
+            print("[-] GraphQL returned errors.")
+            return None
+        
+        return data
+
+    def run(self, output_path: Optional[str] = None):
+        # 1. Get Initial Data
+        user_data = self.fetch_profile_initial()
+        if not user_data:
+            return
+
+        # 2. Extract Profile Info
+        profile_meta = self.extract_profile_meta(user_data)
+        
+        # 3. Process Initial Posts
+        timeline = user_data.get("edge_owner_to_timeline_media", {})
+        edges = timeline.get("edges", [])
+        page_info = timeline.get("page_info", {})
+        
+        all_posts = []
+        for edge in edges:
+            if len(all_posts) >= self.max_posts:
+                break
+            all_posts.append(self.parse_post(edge['node']))
+            
+        print(f"[+] Scraped {len(all_posts)} posts (Initial Load)")
+        if len(all_posts) == 0:
+            print("[!] Initial timeline empty or hidden.")
+
+        # 4. Handle Pagination
+        user_id = user_data['id']
+        has_next = page_info.get("has_next_page")
+        end_cursor = page_info.get("end_cursor")
+
+        # If initial response is empty, try GraphQL from scratch
+        if len(all_posts) == 0 and len(all_posts) < self.max_posts:
+            data = self.fetch_graphql_page(user_id, after=None, first=12)
+            if data:
+                timeline = data.get("data", {}).get("user", {}).get("edge_owner_to_timeline_media", {})
+                edges = timeline.get("edges", [])
+                page_info = timeline.get("page_info", {})
+                for edge in edges:
+                    if len(all_posts) >= self.max_posts:
+                        break
+                    all_posts.append(self.parse_post(edge['node']))
+                has_next = page_info.get("has_next_page")
+                end_cursor = page_info.get("end_cursor")
+                print(f"[+] Total posts collected after GraphQL first page: {len(all_posts)}")
+        
+        # If initial load didn't have pagination info but we have posts, ensure we continue
+        if len(all_posts) > 0 and has_next is None and page_info:
+            has_next = page_info.get("has_next_page")
+            end_cursor = page_info.get("end_cursor")
+
+        pagination_attempts = 0
+        while len(all_posts) < self.max_posts and has_next and end_cursor and pagination_attempts < 5:
+            pagination_attempts += 1
+            # Random sleep to avoid bot detection
+            sleep_time = random.uniform(self.delay_min, self.delay_max)
+            print(f"[*] Sleeping {sleep_time:.2f}s...")
+            time.sleep(sleep_time)
+
+            cursor_preview = (end_cursor[:10] + '...') if isinstance(end_cursor, str) else 'N/A'
+            print(f"[*] Fetching next page (Attempt {pagination_attempts}, Cursor: {cursor_preview})")
+            data = self.fetch_graphql_next_page(user_id, end_cursor)
+            
+            if not data:
+                print(f"[!] GraphQL pagination blocked after {pagination_attempts} attempt(s).")
+                print("[*] Note: Instagram blocks GraphQL from datacenter IPs. Use a residential proxy or session from same IP.")
+                break
+                
+            timeline = data.get("data", {}).get("user", {}).get("edge_owner_to_timeline_media", {})
+            edges = timeline.get("edges", [])
+            page_info = timeline.get("page_info", {})
+            
+            for edge in edges:
+                if len(all_posts) >= self.max_posts:
+                    break
+                all_posts.append(self.parse_post(edge['node']))
+            
+            has_next = page_info.get("has_next_page")
+            end_cursor = page_info.get("end_cursor")
+            print(f"[+] Total posts collected: {len(all_posts)}")
+
+        # 5. Output Result
+        output = {
+            "profile": profile_meta,
+            "posts": all_posts
+        }
+        
+        filename = output_path or f"{self.username}_data.json"
+        with open(filename, "w", encoding='utf-8') as f:
+            json.dump(output, f, indent=4, ensure_ascii=False)
+            
+        print(f"[SUCCESS] Data saved to {filename}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Instagram scraper (public web)")
+    parser.add_argument("username", help="Instagram username to scrape")
+    parser.add_argument("-n", "--max-posts", type=int, default=50, help="Maximum number of posts to scrape (default: 50)")
+    parser.add_argument("--sessionid", type=str, default=None, help="Instagram sessionid cookie value (optional but recommended)")
+    parser.add_argument("--cookie-string", type=str, default=None, help="Full cookie header string for instagram.com (e.g., 'sessionid=...; ds_user_id=...; csrftoken=...')")
+    parser.add_argument("--delay-min", type=float, default=2.0, help="Minimum delay between requests (seconds)")
+    parser.add_argument("--delay-max", type=float, default=5.0, help="Maximum delay between requests (seconds)")
+    parser.add_argument("--ig-www-claim", type=str, default=None, help="X-IG-WWW-Claim header value (from browser DevTools)")
+    parser.add_argument("--ig-u-ds-user-id", type=str, default=None, help="IG-U-DS-USER-ID header value (from browser DevTools)")
+    parser.add_argument("-o", "--output", type=str, default=None, help="Output JSON path (default: <username>_data.json)")
+
+    args = parser.parse_args()
+
+    if args.delay_max < args.delay_min:
+        print("[-] --delay-max cannot be less than --delay-min")
+        sys.exit(1)
+
+    scraper = InstagramScraper(
+        username=args.username,
+        max_posts=args.max_posts,
+        sessionid=args.sessionid,
+        cookie_string=args.cookie_string,
+        delay=(args.delay_min, args.delay_max),
+        ig_www_claim=args.ig_www_claim,
+        ig_u_ds_user_id=args.ig_u_ds_user_id,
+    )
+    scraper.run(output_path=args.output)
