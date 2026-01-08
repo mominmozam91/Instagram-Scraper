@@ -1,0 +1,120 @@
+{
+  "username": "instagram",
+  "scraped_at": "2025-01-08T12:34:56.789123",
+  "profile": {
+    "username": "instagram",
+    "full_name": "Instagram",
+    "biography": "Bringing you closer to the people and things you love.",
+    "follower_count": 669000000,
+    "following_count": 160,
+    "posts_count": 2891,
+    "profile_picture_url": "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-19/450385928_1234567890_n.jpg?_nc_ht=instagram.fbho13-2&_nc_ohc=example",
+    "is_verified": true,
+    "is_private": false,
+    "is_business": true,
+    "category": "App Page",
+    "external_url": "https://www.instagram.com",
+    "timestamp_scraped": "2025-01-08T12:34:56.789123"
+  },
+  "posts": [
+    {
+      "id": "17999999999999999",
+      "shortcode": "DCzAbcDEfGh",
+      "caption": "Introducing Reels on Instagram 🎬✨",
+      "like_count": 5234567,
+      "view_count": 0,
+      "comment_count": 234567,
+      "timestamp": "2025-01-07T18:30:45.000000",
+      "media_type": "IMAGE",
+      "media_urls": [
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-15/example.jpg"
+      ],
+      "location": null,
+      "permalink": "https://www.instagram.com/p/DCzAbcDEfGh/",
+      "username": "instagram"
+    },
+    {
+      "id": "17888888888888888",
+      "shortcode": "DCxXyZAbCdEf",
+      "caption": "The new Stories Camera has arrived 📸",
+      "like_count": 4123456,
+      "view_count": 0,
+      "comment_count": 145678,
+      "timestamp": "2025-01-06T14:22:10.000000",
+      "media_type": "CAROUSEL",
+      "media_urls": [
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-15/carousel1.jpg",
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-15/carousel2.jpg",
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-15/carousel3.jpg"
+      ],
+      "location": null,
+      "permalink": "https://www.instagram.com/p/DCxXyZAbCdEf/",
+      "username": "instagram"
+    },
+    {
+      "id": "17777777777777777",
+      "shortcode": "DCvMnOpQrStu",
+      "caption": "Connecting communities through shared interests 💙",
+      "like_count": 3987654,
+      "view_count": 0,
+      "comment_count": 98765,
+      "timestamp": "2025-01-05T10:15:32.000000",
+      "media_type": "IMAGE",
+      "media_urls": [
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-15/example2.jpg"
+      ],
+      "location": "Menlo Park, California",
+      "permalink": "https://www.instagram.com/p/DCvMnOpQrStu/",
+      "username": "instagram"
+    },
+    {
+      "id": "17666666666666666",
+      "shortcode": "DCtoJkLmNoPq",
+      "caption": "Building the next era of social commerce 🛍️",
+      "like_count": 2654321,
+      "view_count": 15000000,
+      "comment_count": 78432,
+      "timestamp": "2025-01-04T09:45:20.000000",
+      "media_type": "VIDEO",
+      "media_urls": [
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t50.2886-16/example_video.mp4"
+      ],
+      "location": null,
+      "permalink": "https://www.instagram.com/p/DCtoJkLmNoPq/",
+      "username": "instagram"
+    },
+    {
+      "id": "17555555555555555",
+      "shortcode": "DCsIjKlMnOuV",
+      "caption": "🎉 Celebrating 700M followers! Thank you for being part of this journey!",
+      "like_count": 8901234,
+      "view_count": 0,
+      "comment_count": 234567,
+      "timestamp": "2025-01-03T20:30:00.000000",
+      "media_type": "IMAGE",
+      "media_urls": [
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-15/celebration.jpg"
+      ],
+      "location": null,
+      "permalink": "https://www.instagram.com/p/DCsIjKlMnOuV/",
+      "username": "instagram"
+    },
+    {
+      "id": "17444444444444444",
+      "shortcode": "DCqEfGhIjKlM",
+      "caption": "New features rolling out to help creators grow 📈",
+      "like_count": 2345678,
+      "view_count": 0,
+      "comment_count": 56789,
+      "timestamp": "2025-01-02T16:20:15.000000",
+      "media_type": "CAROUSEL",
+      "media_urls": [
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-15/feature1.jpg",
+        "https://instagram.fbho13-2.fna.fbcdn.net/v/t51.2885-15/feature2.jpg"
+      ],
+      "location": null,
+      "permalink": "https://www.instagram.com/p/DCqEfGhIjKlM/",
+      "username": "instagram"
+    }
+  ]
+}
