@@ -103,3 +103,200 @@ class InstagramScraper:
         preferred = [c for c in candidates if (c.domain.endswith('instagram.com') and c.path == '/')]
         chosen = preferred[0] if preferred else candidates[0]
         return chosen.value
+
+    def _retry_graphql(self, url, params, max_retries=3):
+        """Retry GraphQL request with exponential backoff."""
+        for attempt in range(max_retries):
+            try:
+                headers = dict(self.headers)
+                if self.csrf_token and 'X-CSRFToken' not in headers:
+                    headers['X-CSRFToken'] = self.csrf_token
+                response = self.session.get(url, headers=headers, params=params, cookies=self.session.cookies, timeout=20)
+                
+                if response.status_code == 200:
+                    ctype = response.headers.get('Content-Type', '')
+                    if 'application/json' in ctype:
+                        return response.json()
+                elif response.status_code in (429, 403, 503):
+                    # Rate limited or forbidden; retry with backoff
+                    if attempt < max_retries - 1:
+                        wait = 2 ** attempt  # 1, 2, 4 seconds
+                        print(f"[*] Rate limited (status {response.status_code}), retrying in {wait}s...")
+                        time.sleep(wait)
+                        continue
+                
+                return None
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                return None
+        return None
+
+    def fetch_posts_from_html(self, username: str):
+        """Fallback: extract posts from profile page HTML when GraphQL fails."""
+        url = f"https://www.instagram.com/{username}/"
+        try:
+            headers = dict(self.headers)
+            headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            response = self.session.get(url, headers=headers, timeout=20)
+            
+            if response.status_code != 200:
+                return []
+            
+            html = response.text
+            
+            # Look for shared data in script tags
+            match = re.search(r'window\._sharedData\s*=\s*({.*?});', html, re.DOTALL)
+            if not match:
+                # Try alternate pattern
+                match = re.search(r'"edge_owner_to_timeline_media":\s*{([^}]*"edges":[^\]]*\][^}]*)}}', html, re.DOTALL)
+                if not match:
+                    return []
+            
+            try:
+                if match.group(0).startswith('window'):
+                    # Parse the shared data object
+                    data_str = match.group(1)
+                    shared_data = json.loads(data_str)
+                    
+                    # Navigate through the structure
+                    user = shared_data.get('entry_data', {}).get('ProfilePage', [{}])[0].get('graphql', {}).get('user', {})
+                    timeline = user.get('edge_owner_to_timeline_media', {})
+                    edges = timeline.get('edges', [])
+                else:
+                    # Parse individual edges
+                    edges_match = re.search(r'"edges":\s*(\[.*?\])(?:,"page_info")', html, re.DOTALL)
+                    if not edges_match:
+                        return []
+                    edges = json.loads(edges_match.group(1))
+                
+                posts = []
+                for edge in edges[:self.max_posts]:
+                    if 'node' in edge:
+                        try:
+                            posts.append(self.parse_post(edge['node']))
+                        except:
+                            continue
+                return posts
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                return []
+        except Exception as e:
+            return []
+
+    def _apply_cookie_string(self, cookie_str: str) -> None:
+        """Parse and add semicolon-separated cookie string into the session jar."""
+        try:
+            parts = [p.strip() for p in cookie_str.split(';') if p.strip()]
+            for part in parts:
+                if '=' not in part:
+                    continue
+                name, value = part.split('=', 1)
+                name = name.strip()
+                value = value.strip()
+                self.session.cookies.set(name, value, domain='.instagram.com', path='/')
+                self.cookies[name] = value
+        except Exception:
+            pass
+
+    def fetch_profile_initial(self):
+        """
+        Fetches profile metadata and the first batch of posts using the 
+        internal web_profile_info endpoint.
+        """
+        print(f"[*] Fetching profile data for: {self.username}")
+        url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={self.username}"
+        
+        try:
+            # Use session cookies (merged) and include CSRF when available
+            headers = dict(self.headers)
+            if self.csrf_token and 'X-CSRFToken' not in headers:
+                headers['X-CSRFToken'] = self.csrf_token
+            response = self.session.get(url, headers=headers, cookies=self.session.cookies, allow_redirects=True, timeout=20)
+
+            # Check for soft-block / login-wall
+            if response.status_code in (301, 302) or "login" in response.url:
+                print("[-] Error: Redirected to login. Your IP is likely flagged.")
+                print("    Fix: Add a 'sessionid' cookie to the script or use a residential proxy.")
+                sys.exit(1)
+
+            response.raise_for_status()
+            data = response.json()
+            user = data.get('data', {}).get('user')
+            if not user:
+                print("[-] Error: No user data returned. The account may be private or blocked.")
+                sys.exit(1)
+            return user
+
+        except requests.exceptions.HTTPError as e:
+            print(f"[-] HTTP Error: {e}")
+            sys.exit(1)
+        except json.JSONDecodeError:
+            print("[-] Error: Failed to parse JSON. Instagram likely returned HTML (Login wall).")
+            sys.exit(1)
+
+    def extract_profile_meta(self, user_data):
+        """Extracts the required profile fields."""
+        return {
+            "username": user_data.get("username"),
+            "full_name": user_data.get("full_name"),
+            "biography": user_data.get("biography"),
+            "follower_count": user_data.get("edge_followed_by", {}).get("count"),
+            "following_count": user_data.get("edge_follow", {}).get("count"),
+            "posts_count": user_data.get("edge_owner_to_timeline_media", {}).get("count"),
+            "profile_pic_url": user_data.get("profile_pic_url_hd"),
+            "is_verified": user_data.get("is_verified"),
+            "category": user_data.get("category_name"),
+            "external_url": user_data.get("external_url"),
+        }
+
+    def parse_post(self, node):
+        """Parses a single post node from the Graph structure."""
+        # Extract view count (available for videos, 0 for images)
+        view_count = node.get("video_view_count") or 0
+        
+        return {
+            "id": node.get("id"),
+            "shortcode": node.get("shortcode"),
+            "caption": node['edge_media_to_caption']['edges'][0]['node']['text'] if node.get("edge_media_to_caption", {}).get("edges") else "",
+            "like_count": node.get("edge_media_preview_like", {}).get("count"),
+            "comment_count": node.get("edge_media_to_comment", {}).get("count"),
+            "view_count": view_count,
+            "timestamp": node.get("taken_at_timestamp"),
+            "media_type": "video" if node.get("is_video") else "image",
+            "media_url": node.get("video_url") if node.get("is_video") else node.get("display_url"),
+            "location": node.get("location", {}).get("name") if node.get("location") else None,
+            "permalink": f"https://www.instagram.com/p/{node.get('shortcode')}/"
+        }
+
+    def fetch_graphql_next_page(self, user_id, end_cursor):
+        """
+        Uses the GraphQL endpoint to fetch the next page of posts.
+        """
+        # This query_hash is for 'User Posts'. These rotate occasionally.
+        # In a full production system, we would scrape this hash dynamically from Consumer.js
+        QUERY_HASH = "69cba40317214236af40e7efa697781d" 
+        
+        params = {
+            "query_hash": QUERY_HASH,
+            "variables": json.dumps({
+                "id": user_id,
+                "first": 12,
+                "after": end_cursor
+            })
+        }
+        
+        url = "https://www.instagram.com/graphql/query/"
+        data = self._retry_graphql(url, params, max_retries=3)
+        
+        if not data:
+            print("[-] GraphQL returned non-JSON or rate-limited (likely login wall). Stopping pagination.")
+            return None
+
+        # Check for GraphQL errors (rate limiting, auth required, etc.)
+        if 'errors' in data:
+            print("[-] GraphQL returned errors. Likely rate-limited or authentication required.")
+            print(f"    Error: {data.get('errors', [{}])[0].get('message', 'Unknown')}")
+            return None
+        
+        return data
