@@ -6,7 +6,12 @@ import random
 import argparse
 import sys
 import re
+import os
 from typing import Optional, Tuple
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class InstagramScraper:
@@ -58,6 +63,7 @@ class InstagramScraper:
                 pass
 
         # Optional: load a full cookie string (e.g., copied from browser DevTools)
+        # NOTE: This may override sessionid if also provided separately
         if cookie_string:
             self._apply_cookie_string(cookie_string)
 
@@ -84,7 +90,12 @@ class InstagramScraper:
                 self.session.cookies.set(k, v)
             # Merge provided cookies like sessionid
             for k, v in self.cookies.items():
-                self.session.cookies.set(k, v)
+                try:
+                    self.session.cookies.set(k, v, domain='.instagram.com', path='/')
+                except:
+                    # If duplicate exists, clear and set
+                    self.session.cookies.clear(domain='.instagram.com', path='/', name=k)
+                    self.session.cookies.set(k, v, domain='.instagram.com', path='/')
             self.csrf_token = self._pick_csrf_token()
             if self.csrf_token:
                 self.headers['X-CSRFToken'] = self.csrf_token
@@ -111,22 +122,46 @@ class InstagramScraper:
                 headers = dict(self.headers)
                 if self.csrf_token and 'X-CSRFToken' not in headers:
                     headers['X-CSRFToken'] = self.csrf_token
-                response = self.session.get(url, headers=headers, params=params, cookies=self.session.cookies, timeout=20)
+                
+                # DEBUG: Print cookies being sent
+                cookie_names = [c.name for c in self.session.cookies]
+                if 'sessionid' in cookie_names:
+                    try:
+                        sessionid_val = self.session.cookies.get('sessionid')
+                        print(f"[DEBUG] Sending sessionid: {sessionid_val[:20]}..." if sessionid_val else "[DEBUG] sessionid is empty!")
+                    except:
+                        print("[DEBUG] Multiple sessionid cookies found - will use them anyway")
+                else:
+                    print(f"[DEBUG] WARNING: sessionid NOT in cookies! Available: {cookie_names}")
+                
+                response = self.session.get(url, headers=headers, params=params, timeout=20)
+                
+                print(f"[DEBUG] GraphQL response status: {response.status_code}")
                 
                 if response.status_code == 200:
                     ctype = response.headers.get('Content-Type', '')
                     if 'application/json' in ctype:
-                        return response.json()
+                        data = response.json()
+                        if 'errors' in data:
+                            print(f"[DEBUG] GraphQL errors: {data.get('errors')}")
+                        return data
+                    else:
+                        print(f"[DEBUG] GraphQL returned non-JSON content-type: {ctype}")
+                        print(f"[DEBUG] Response preview: {response.text[:200]}")
                 elif response.status_code in (429, 403, 503):
                     # Rate limited or forbidden; retry with backoff
+                    print(f"[DEBUG] Status {response.status_code}, response: {response.text[:200]}")
                     if attempt < max_retries - 1:
                         wait = 2 ** attempt  # 1, 2, 4 seconds
                         print(f"[*] Rate limited (status {response.status_code}), retrying in {wait}s...")
                         time.sleep(wait)
                         continue
+                else:
+                    print(f"[DEBUG] Unexpected status {response.status_code}: {response.text[:200]}")
                 
                 return None
             except Exception as e:
+                print(f"[DEBUG] Exception in GraphQL: {e}")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
                     continue
@@ -226,6 +261,16 @@ class InstagramScraper:
             if not user:
                 print("[-] Error: No user data returned. The account may be private or blocked.")
                 sys.exit(1)
+            
+            # DEBUG: Check timeline structure
+            timeline = user.get('edge_owner_to_timeline_media', {})
+            edges_count = len(timeline.get('edges', []))
+            print(f"[DEBUG] Initial posts in response: {edges_count}")
+            if edges_count == 0:
+                print(f"[DEBUG] Timeline data structure: {list(timeline.keys())}")
+                print(f"[DEBUG] Timeline page_info: {timeline.get('page_info', {})}")
+                print(f"[DEBUG] Timeline count: {timeline.get('count', 'N/A')}")
+            
             return user
 
         except requests.exceptions.HTTPError as e:
@@ -281,7 +326,7 @@ class InstagramScraper:
             "query_hash": QUERY_HASH,
             "variables": json.dumps({
                 "id": user_id,
-                "first": 12,
+                "first": 15,
                 "after": end_cursor
             })
         }
@@ -301,7 +346,7 @@ class InstagramScraper:
         
         return data
 
-    def fetch_graphql_page(self, user_id: str, after: Optional[str] = None, first: int = 12):
+    def fetch_graphql_page(self, user_id: str, after: Optional[str] = None, first: int = 15):
         """Fetch a page of posts via GraphQL, allowing the first page (no cursor)."""
         QUERY_HASH = "69cba40317214236af40e7efa697781d"
         variables = {"id": user_id, "first": first}
@@ -352,7 +397,8 @@ class InstagramScraper:
 
         # If initial response is empty, try GraphQL from scratch
         if len(all_posts) == 0 and len(all_posts) < self.max_posts:
-            data = self.fetch_graphql_page(user_id, after=None, first=12)
+            print("[*] Initial API returned no posts. Trying GraphQL directly...")
+            data = self.fetch_graphql_page(user_id, after=None, first=15)
             if data:
                 timeline = data.get("data", {}).get("user", {}).get("edge_owner_to_timeline_media", {})
                 edges = timeline.get("edges", [])
@@ -364,6 +410,8 @@ class InstagramScraper:
                 has_next = page_info.get("has_next_page")
                 end_cursor = page_info.get("end_cursor")
                 print(f"[+] Total posts collected after GraphQL first page: {len(all_posts)}")
+            else:
+                print("[-] GraphQL first page also failed. Cannot proceed.")
         
         # If initial load didn't have pagination info but we have posts, ensure we continue
         if len(all_posts) > 0 and has_next is None and page_info:
@@ -416,15 +464,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Instagram scraper (public web)")
     parser.add_argument("username", help="Instagram username to scrape")
     parser.add_argument("-n", "--max-posts", type=int, default=50, help="Maximum number of posts to scrape (default: 50)")
-    parser.add_argument("--sessionid", type=str, default=None, help="Instagram sessionid cookie value (optional but recommended)")
-    parser.add_argument("--cookie-string", type=str, default=None, help="Full cookie header string for instagram.com (e.g., 'sessionid=...; ds_user_id=...; csrftoken=...')")
     parser.add_argument("--delay-min", type=float, default=2.0, help="Minimum delay between requests (seconds)")
     parser.add_argument("--delay-max", type=float, default=5.0, help="Maximum delay between requests (seconds)")
-    parser.add_argument("--ig-www-claim", type=str, default=None, help="X-IG-WWW-Claim header value (from browser DevTools)")
-    parser.add_argument("--ig-u-ds-user-id", type=str, default=None, help="IG-U-DS-USER-ID header value (from browser DevTools)")
     parser.add_argument("-o", "--output", type=str, default=None, help="Output JSON path (default: <username>_data.json)")
 
     args = parser.parse_args()
+
+    # Load credentials from environment variables
+    sessionid = os.getenv('INSTAGRAM_SESSION_ID')
+    cookie_string = os.getenv('INSTAGRAM_COOKIE_STRING')
+    ig_www_claim = os.getenv('INSTAGRAM_WWW_CLAIM')
+    ig_u_ds_user_id = os.getenv('INSTAGRAM_U_DS_USER_ID')
 
     if args.delay_max < args.delay_min:
         print("[-] --delay-max cannot be less than --delay-min")
@@ -433,10 +483,10 @@ if __name__ == "__main__":
     scraper = InstagramScraper(
         username=args.username,
         max_posts=args.max_posts,
-        sessionid=args.sessionid,
-        cookie_string=args.cookie_string,
+        sessionid=sessionid,
+        cookie_string=cookie_string,
         delay=(args.delay_min, args.delay_max),
-        ig_www_claim=args.ig_www_claim,
-        ig_u_ds_user_id=args.ig_u_ds_user_id,
+        ig_www_claim=ig_www_claim,
+        ig_u_ds_user_id=ig_u_ds_user_id,
     )
     scraper.run(output_path=args.output)

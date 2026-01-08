@@ -28,7 +28,37 @@ cd scraper
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Create .env file from example
+cp .env.example .env
+
+# Edit .env file with your Instagram cookies (optional, for pagination)
+nano .env  # or use your preferred editor
 ```
+
+### Configuration (.env file)
+
+The scraper uses environment variables for sensitive data. Copy `.env.example` to `.env` and configure:
+
+```bash
+# Instagram Session Cookies (Optional - for pagination beyond 12 posts)
+INSTAGRAM_SESSIONID=your_session_id_here
+INSTAGRAM_COOKIE_STRING=sessionid=...; ds_user_id=...; csrftoken=...
+
+# Additional Headers (Optional)
+INSTAGRAM_WWW_CLAIM=
+INSTAGRAM_DS_USER_ID=
+
+# Request Delays (seconds)
+DELAY_MIN=2.0
+DELAY_MAX=5.0
+```
+
+**How to get cookies:**
+1. Open Instagram in your browser and log in
+2. Open DevTools (F12) → Application → Cookies → instagram.com
+3. Copy values for: `sessionid`, `ds_user_id`, `csrftoken`
+4. Add to `.env` file
 
 ## Usage
 
@@ -45,15 +75,17 @@ python scraper.py instagram
 
 This will create `instagram_data.json` with all scraped data.
 
-### Custom Output File
+### With Options
 
 ```bash
-python scraper.py <username> <output_file>
-```
+# Scrape 20 posts
+python scraper.py nasa -n 20
 
-Example:
-```bash
-python scraper.py nasa nasa_profile.json
+# Custom output file
+python scraper.py nasa -o nasa_profile.json
+
+# Scrape 50 posts with custom output
+python scraper.py instagram -n 50 -o output.json
 ```
 
 ## Output Format
